@@ -147,23 +147,9 @@
   button.play:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
   .tempo-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
     font-size: 0.85rem;
     color: var(--ivory-dim);
   }
-  .tempo-label input {
-    width: 56px;
-    background: var(--bg-panel-2);
-    border: 1px solid var(--line);
-    color: var(--ivory);
-    font-family: 'Inter', sans-serif;
-    font-size: 0.85rem;
-    padding: 5px 8px;
-    border-radius: 6px;
-  }
-  .tempo-label input:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
   .highway {
     position: relative;
@@ -284,6 +270,7 @@
     background: var(--bg-panel);
     border: 1px solid var(--line);
     border-radius: 10px;
+    cursor: pointer;
   }
 
   .win {
@@ -325,11 +312,7 @@
 
   <div class="tempo-row">
     <button class="play" id="playBtn">Jouer</button>
-    <label class="tempo-label" for="tempoInput">
-      Tempo
-      <input type="number" id="tempoInput" min="40" max="200" step="1" value="90">
-      BPM
-    </label>
+    <span class="tempo-label">108 BPM</span>
   </div>
 
   <div class="win" id="winBox">
@@ -374,12 +357,14 @@
 
   var PX_PER_BEAT = 55;
   var HIT_LINE_OFFSET = 34;
+  var SONG_TEMPO = 108; // tempo propre à "Au clair de la lune", pas réglable par l'utilisateur
+  var LEAD_IN_BEATS = 2; // temps d'anticipation avant la toute première note
 
   var currentIndex = 0;
   var playing = false;
-  var scheduledTimer = null;
-  var currentNoteStartedAt = 0;
-  var currentNoteDurationMs = 0;
+  var frozen = false; // true = le défilement attend que la bonne note soit jouée
+  var anchorRealTime = 0;
+  var anchorBeats = 0;
   var barEls = [];
 
   var targetEl = document.getElementById('targetNote');
@@ -387,14 +372,12 @@
   var winBox = document.getElementById('winBox');
   var midiStatusEl = document.getElementById('midiStatus');
   var playBtn = document.getElementById('playBtn');
-  var tempoInput = document.getElementById('tempoInput');
   var highwayEl = document.getElementById('highway');
 
-  function getTempo() {
-    var bpm = parseInt(tempoInput.value, 10);
-    if (!bpm || bpm < 40) return 40;
-    if (bpm > 200) return 200;
-    return bpm;
+  // Distance (en temps) que doit parcourir la note courante avant d'atteindre la ligne :
+  // le temps d'anticipation pour la toute première note, sinon la durée de la note précédente.
+  function approachBeats() {
+    return currentIndex === 0 ? LEAD_IN_BEATS : expectedBeats[currentIndex - 1];
   }
 
   function renderHighway(elapsedBeats) {
@@ -415,9 +398,22 @@
 
   function animationTick() {
     if (!playing) return;
-    var elapsedInNote = Date.now() - currentNoteStartedAt;
-    var frac = currentNoteDurationMs > 0 ? Math.min(1, elapsedInNote / currentNoteDurationMs) : 1;
-    var elapsedBeats = (cumulativeBeats[currentIndex] || 0) + frac * (expectedBeats[currentIndex] || 0);
+
+    if (frozen) {
+      renderHighway(cumulativeBeats[currentIndex]);
+      requestAnimationFrame(animationTick);
+      return;
+    }
+
+    var elapsedBeats = anchorBeats + (Date.now() - anchorRealTime) * (SONG_TEMPO / 60000);
+
+    if (elapsedBeats >= cumulativeBeats[currentIndex]) {
+      frozen = true;
+      renderHighway(cumulativeBeats[currentIndex]);
+      requestAnimationFrame(animationTick);
+      return;
+    }
+
     renderHighway(elapsedBeats);
     requestAnimationFrame(animationTick);
   }
@@ -432,7 +428,7 @@
     targetEl.textContent = ' ' + expectedNotes[currentIndex];
     updateCurrentBarClass();
     if (!playing) {
-      renderHighway(cumulativeBeats[currentIndex]);
+      renderHighway(cumulativeBeats[currentIndex] - approachBeats());
     }
   }
 
@@ -461,36 +457,15 @@
     flashBarEl(barEls[currentIndex], ok);
     lastNoteEl.classList.add(ok ? 'ok' : 'bad');
 
-    if (playing) return;
+    if (!ok) return;
 
-    if (ok) {
-      currentIndex++;
-      updateTarget();
-    }
-  }
-
-  function clearScheduledTimer() {
-    if (scheduledTimer) {
-      clearTimeout(scheduledTimer);
-      scheduledTimer = null;
-    }
-  }
-
-  function advanceAuto() {
     currentIndex++;
-    updateTarget();
     if (playing && currentIndex < expectedNotes.length) {
-      scheduleNext();
+      frozen = false;
+      anchorRealTime = Date.now();
+      anchorBeats = cumulativeBeats[currentIndex] - approachBeats();
     }
-  }
-
-  function scheduleNext() {
-    clearScheduledTimer();
-    if (!playing || currentIndex >= expectedNotes.length) return;
-    var ms = expectedBeats[currentIndex] * (60000 / getTempo());
-    currentNoteStartedAt = Date.now();
-    currentNoteDurationMs = ms;
-    scheduledTimer = setTimeout(advanceAuto, ms);
+    updateTarget();
   }
 
   function updatePlayButton() {
@@ -503,22 +478,23 @@
     playing = !playing;
     updatePlayButton();
     if (playing) {
-      scheduleNext();
+      if (!frozen) {
+        anchorRealTime = Date.now();
+        anchorBeats = cumulativeBeats[currentIndex] - approachBeats();
+      }
       requestAnimationFrame(animationTick);
-    } else {
-      clearScheduledTimer();
     }
   }
   playBtn.addEventListener('click', togglePlay);
 
   function stopPlayback() {
     playing = false;
-    clearScheduledTimer();
     updatePlayButton();
   }
 
   function resetAll() {
     currentIndex = 0;
+    frozen = false;
     stopPlayback();
     winBox.classList.remove('show');
     lastNoteEl.textContent = '\u00A0';
@@ -609,13 +585,21 @@
     return names[n % 12] + octave;
   }
 
-  if (navigator.requestMIDIAccess) {
+  var midiConnected = false;
+
+  function connectMidi() {
+    if (!navigator.requestMIDIAccess) {
+      midiStatusEl.textContent = 'Ton navigateur ne supporte pas le MIDI — joue avec le clavier virtuel ci-dessous.';
+      return;
+    }
+    midiStatusEl.textContent = 'Recherche d\'un clavier MIDI…';
     navigator.requestMIDIAccess().then(function (access) {
       var inputs = Array.from(access.inputs.values());
       if (inputs.length === 0) {
-        midiStatusEl.textContent = 'Pas de clavier MIDI branché — joue avec le clavier virtuel ci-dessous.';
+        midiStatusEl.textContent = 'Pas de clavier MIDI détecté — branche-le puis touche ce message pour réessayer.';
         return;
       }
+      midiConnected = true;
       midiStatusEl.textContent = 'Clavier MIDI connecté : ' + inputs[0].name;
       inputs.forEach(function (input) {
         input.onmidimessage = function (msg) {
@@ -628,12 +612,16 @@
           }
         };
       });
+      access.onstatechange = function () { connectMidi(); };
     }).catch(function () {
-      midiStatusEl.textContent = 'Pas d\'accès au clavier MIDI ici — joue avec le clavier virtuel ci-dessous.';
+      midiStatusEl.textContent = 'Pas d\'accès au clavier MIDI ici — touche ce message pour réessayer.';
     });
-  } else {
-    midiStatusEl.textContent = 'Ton navigateur ne supporte pas le MIDI — joue avec le clavier virtuel ci-dessous.';
   }
+
+  midiStatusEl.addEventListener('click', function () {
+    if (!midiConnected) connectMidi();
+  });
+  connectMidi();
 })();
 </script>
 
