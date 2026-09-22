@@ -18,7 +18,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.8.4/build/opensheetmusicdisplay.min.js"></script>
 <style>
   :root {
     box-sizing: border-box;
@@ -166,14 +165,37 @@
   }
   .tempo-label input:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
-  .sheet-wrap {
-    background: var(--ivory);
-    border-radius: 14px;
-    padding: 18px 16px 8px;
-    overflow-x: auto;
-    box-shadow: 0 8px 24px #00000030;
+  .highway {
+    position: relative;
+    height: 220px;
+    margin-bottom: 14px;
+    overflow: hidden;
+    border-radius: 10px;
+    background: linear-gradient(180deg, var(--bg-panel-2), var(--bg-panel));
   }
-  #sheet { min-width: 480px; }
+  .hit-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 34px;
+    height: 2px;
+    background: var(--gold);
+    box-shadow: 0 0 10px var(--gold-soft);
+    z-index: 2;
+  }
+  .note-bar {
+    position: absolute;
+    border-radius: 6px;
+    background: linear-gradient(180deg, #6E9BD8, #4A72A8);
+    box-shadow: 0 0 0 1px #00000030 inset;
+    transition: background 0.12s ease;
+  }
+  .note-bar.current {
+    background: linear-gradient(180deg, var(--gold-soft), var(--gold));
+    box-shadow: 0 0 12px var(--gold);
+  }
+  .note-bar.correct { background: linear-gradient(180deg, #8FDBA8, var(--ok)); }
+  .note-bar.wrong { background: linear-gradient(180deg, #E8A796, var(--bad)); }
 
   .midi-note {
     font-size: 0.8rem;
@@ -284,6 +306,7 @@
 
   @media (max-width: 480px) {
     .piano { height: 130px; }
+    .highway { height: 170px; }
   }
 </style>
 </head>
@@ -291,7 +314,7 @@
 
 <header>
   <h1>Apprends le piano</h1>
-  <div class="sub">Suis la partition, joue les bonnes notes, progresse à ton rythme</div>
+  <div class="sub">Joue la bonne note au bon moment, progresse à ton rythme</div>
 </header>
 
 <main>
@@ -309,10 +332,6 @@
     </label>
   </div>
 
-  <div class="sheet-wrap">
-    <div id="sheet"></div>
-  </div>
-
   <div class="win" id="winBox">
     <h2>Bravo, morceau terminé.</h2>
     <p>Toutes les notes ont été jouées dans l'ordre.</p>
@@ -321,6 +340,9 @@
   <div class="midi-status" id="midiStatus">Recherche d'un clavier MIDI…</div>
 
   <div class="piano-wrap">
+    <div class="highway" id="highway">
+      <div class="hit-line"></div>
+    </div>
     <div class="piano" id="piano"></div>
     <div class="midi-note" id="lastNote">&nbsp;</div>
   </div>
@@ -339,30 +361,26 @@
 <script>
 (function () {
   // --- Mélodie de démonstration (transcription simplifiée, domaine public) ---
-  var musicXML = '<?xml version="1.0" encoding="UTF-8"?>' +
-  '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">' +
-  '<score-partwise version="3.1"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>' +
-  '<part id="P1">' +
-  '<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>' +
-  '<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
-  '<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
-  '<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
-  '<note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>' +
-  '<measure number="2">' +
-  '<note><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>' +
-  '<note><pitch><step>D</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note></measure>' +
-  '<measure number="3">' +
-  '<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
-  '<note><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>' +
-  '<note><pitch><step>D</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note></measure>' +
-  '</part></score-partwise>';
-
   var expectedNotes = ["C4","C4","C4","D4","E4","D4","C4","E4","D4"];
   var expectedBeats = [1, 1, 1, 1, 2, 2, 1, 1, 2];
+  var cumulativeBeats = [];
+  (function () {
+    var acc = 0;
+    for (var i = 0; i < expectedBeats.length; i++) {
+      cumulativeBeats.push(acc);
+      acc += expectedBeats[i];
+    }
+  })();
+
+  var PX_PER_BEAT = 55;
+  var HIT_LINE_OFFSET = 34;
+
   var currentIndex = 0;
-  var osmd = null;
   var playing = false;
   var scheduledTimer = null;
+  var currentNoteStartedAt = 0;
+  var currentNoteDurationMs = 0;
+  var barEls = [];
 
   var targetEl = document.getElementById('targetNote');
   var lastNoteEl = document.getElementById('lastNote');
@@ -370,6 +388,7 @@
   var midiStatusEl = document.getElementById('midiStatus');
   var playBtn = document.getElementById('playBtn');
   var tempoInput = document.getElementById('tempoInput');
+  var highwayEl = document.getElementById('highway');
 
   function getTempo() {
     var bpm = parseInt(tempoInput.value, 10);
@@ -378,25 +397,53 @@
     return bpm;
   }
 
-  function scrollCursorIntoView() {
-    if (!osmd || !osmd.cursor || !osmd.cursor.cursorElement) return;
-    try {
-      osmd.cursor.cursorElement.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    } catch (e) {}
+  function renderHighway(elapsedBeats) {
+    for (var i = 0; i < barEls.length; i++) {
+      var beatsUntilHit = cumulativeBeats[i] - elapsedBeats;
+      var bottomPx = HIT_LINE_OFFSET + beatsUntilHit * PX_PER_BEAT;
+      var heightPx = Math.max(10, expectedBeats[i] * PX_PER_BEAT - 4);
+      barEls[i].style.bottom = bottomPx + 'px';
+      barEls[i].style.height = heightPx + 'px';
+    }
+  }
+
+  function updateCurrentBarClass() {
+    for (var i = 0; i < barEls.length; i++) {
+      barEls[i].classList.toggle('current', i === currentIndex);
+    }
+  }
+
+  function animationTick() {
+    if (!playing) return;
+    var elapsedInNote = Date.now() - currentNoteStartedAt;
+    var frac = currentNoteDurationMs > 0 ? Math.min(1, elapsedInNote / currentNoteDurationMs) : 1;
+    var elapsedBeats = (cumulativeBeats[currentIndex] || 0) + frac * (expectedBeats[currentIndex] || 0);
+    renderHighway(elapsedBeats);
+    requestAnimationFrame(animationTick);
   }
 
   function updateTarget() {
     if (currentIndex >= expectedNotes.length) {
       targetEl.textContent = ' terminé';
       winBox.classList.add('show');
-      if (osmd && osmd.cursor) { try { osmd.cursor.hide(); } catch (e) {} }
       stopPlayback();
       return;
     }
     targetEl.textContent = ' ' + expectedNotes[currentIndex];
+    updateCurrentBarClass();
+    if (!playing) {
+      renderHighway(cumulativeBeats[currentIndex]);
+    }
   }
 
   function flashKeyEl(el, ok) {
+    if (!el) return;
+    el.classList.remove('correct', 'wrong');
+    el.classList.add(ok ? 'correct' : 'wrong');
+    setTimeout(function () { el.classList.remove('correct', 'wrong'); }, 260);
+  }
+
+  function flashBarEl(el, ok) {
     if (!el) return;
     el.classList.remove('correct', 'wrong');
     el.classList.add(ok ? 'correct' : 'wrong');
@@ -411,15 +458,13 @@
 
     var ok = noteName === expectedNotes[currentIndex];
     flashKeyEl(sourceEl, ok);
+    flashBarEl(barEls[currentIndex], ok);
     lastNoteEl.classList.add(ok ? 'ok' : 'bad');
 
     if (playing) return;
 
     if (ok) {
       currentIndex++;
-      if (osmd && osmd.cursor && currentIndex < expectedNotes.length) {
-        try { osmd.cursor.next(); } catch (e) {}
-      }
       updateTarget();
     }
   }
@@ -433,11 +478,7 @@
 
   function advanceAuto() {
     currentIndex++;
-    if (osmd && osmd.cursor && currentIndex < expectedNotes.length) {
-      try { osmd.cursor.next(); } catch (e) {}
-    }
     updateTarget();
-    scrollCursorIntoView();
     if (playing && currentIndex < expectedNotes.length) {
       scheduleNext();
     }
@@ -447,6 +488,8 @@
     clearScheduledTimer();
     if (!playing || currentIndex >= expectedNotes.length) return;
     var ms = expectedBeats[currentIndex] * (60000 / getTempo());
+    currentNoteStartedAt = Date.now();
+    currentNoteDurationMs = ms;
     scheduledTimer = setTimeout(advanceAuto, ms);
   }
 
@@ -461,6 +504,7 @@
     updatePlayButton();
     if (playing) {
       scheduleNext();
+      requestAnimationFrame(animationTick);
     } else {
       clearScheduledTimer();
     }
@@ -479,30 +523,10 @@
     winBox.classList.remove('show');
     lastNoteEl.textContent = '\u00A0';
     lastNoteEl.className = 'midi-note';
-    if (osmd && osmd.cursor) {
-      try { osmd.cursor.reset(); osmd.cursor.show(); } catch (e) {}
-    }
+    barEls.forEach(function (el) { el.classList.remove('correct', 'wrong', 'current'); });
     updateTarget();
   }
   document.getElementById('resetBtn').addEventListener('click', resetAll);
-
-  // --- Rendu de la partition ---
-  if (window.opensheetmusicdisplay) {
-    osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('sheet', {
-      autoResize: true,
-      drawTitle: false,
-      backend: 'svg'
-    });
-    osmd.load(musicXML).then(function () {
-      osmd.render();
-      try { osmd.cursor.show(); } catch (e) {}
-      updateTarget();
-    }).catch(function (err) {
-      document.getElementById('sheet').textContent = 'Impossible de charger la partition (bibliothèque indisponible).';
-    });
-  } else {
-    document.getElementById('sheet').textContent = 'Bibliothèque de partition indisponible dans cet aperçu.';
-  }
 
   // --- Clavier virtuel ---
   var whiteDefs = [
@@ -547,6 +571,28 @@
     pianoEl.appendChild(el);
     keyElsByMidi[d.midi] = el;
   });
+
+  // --- Piste qui défile (aligne chaque barre sur la touche correspondante) ---
+  var noteLayout = {};
+  whiteDefs.forEach(function (d, i) {
+    noteLayout[d.note] = { left: i * whiteWidthPct, width: whiteWidthPct };
+  });
+  blackDefs.forEach(function (d) {
+    noteLayout[d.note] = { left: whiteWidthPct * (d.afterWhite + 1) - 3.1, width: 6.2 };
+  });
+
+  barEls = expectedNotes.map(function (noteName) {
+    var layout = noteLayout[noteName];
+    var bar = document.createElement('div');
+    bar.className = 'note-bar';
+    if (layout) {
+      bar.style.left = layout.left + '%';
+      bar.style.width = layout.width + '%';
+    }
+    highwayEl.appendChild(bar);
+    return bar;
+  });
+  updateTarget();
 
   // --- Clavier d'ordinateur ---
   var keyMap = {};
