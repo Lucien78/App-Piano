@@ -49,24 +49,36 @@
   }
 
   header {
-    padding: 28px 24px 18px;
+    position: relative;
+    padding: 32px 24px 20px;
     border-bottom: 1px solid var(--line);
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 8px;
+    overflow: hidden;
+  }
+  header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--gold-soft), var(--gold) 45%, transparent 90%);
   }
   header h1 {
     font-family: 'Fraunces', serif;
     font-weight: 600;
-    font-size: 1.5rem;
+    font-size: 1.65rem;
     margin: 0;
     letter-spacing: 0.2px;
+    color: var(--ivory);
   }
   header .sub {
     color: var(--ivory-dim);
-    font-size: 0.85rem;
+    font-size: 0.88rem;
   }
 
   main {
@@ -104,19 +116,20 @@
     color: var(--ivory-dim);
     font-family: 'Inter', sans-serif;
     font-size: 0.85rem;
-    padding: 8px 14px;
-    border-radius: 3px;
+    padding: 9px 16px;
+    border-radius: 20px;
     cursor: pointer;
-    transition: border-color 0.15s ease, color 0.15s ease;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
   }
-  button.reset:hover { border-color: var(--gold); color: var(--gold-soft); }
+  button.reset:hover { border-color: var(--gold); color: var(--gold-soft); background: #ffffff08; }
   button.reset:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
   .sheet-wrap {
     background: var(--ivory);
-    border-radius: 4px;
+    border-radius: 14px;
     padding: 18px 16px 8px;
     overflow-x: auto;
+    box-shadow: 0 8px 24px #00000030;
   }
   #sheet { min-width: 480px; }
 
@@ -132,8 +145,9 @@
   .piano-wrap {
     background: var(--bg-panel);
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 14px;
     padding: 20px 16px;
+    box-shadow: 0 8px 24px #00000030;
   }
   .piano {
     position: relative;
@@ -205,7 +219,7 @@
     padding: 10px 14px;
     background: var(--bg-panel);
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: 10px;
   }
 
   .win {
@@ -213,8 +227,9 @@
     text-align: center;
     padding: 22px;
     border: 1px solid var(--gold);
-    border-radius: 6px;
+    border-radius: 14px;
     background: var(--bg-panel-2);
+    box-shadow: 0 8px 24px #00000030;
   }
   .win.show { display: block; }
   .win h2 {
@@ -233,8 +248,8 @@
 <body>
 
 <header>
-  <h1>Prototype — noyau technique</h1>
-  <div class="sub">partition · clavier MIDI ou virtuel · comparaison en direct</div>
+  <h1>Apprends le piano</h1>
+  <div class="sub">Suis la partition, joue les bonnes notes, progresse à ton rythme</div>
 </header>
 
 <main>
@@ -430,7 +445,7 @@
     navigator.requestMIDIAccess().then(function (access) {
       var inputs = Array.from(access.inputs.values());
       if (inputs.length === 0) {
-        midiStatusEl.textContent = 'Aucun clavier MIDI détecté — utilise le clavier virtuel ci-dessous.';
+        midiStatusEl.textContent = 'Pas de clavier MIDI branché — joue avec le clavier virtuel ci-dessous.';
         return;
       }
       midiStatusEl.textContent = 'Clavier MIDI connecté : ' + inputs[0].name;
@@ -446,10 +461,10 @@
         };
       });
     }).catch(function () {
-      midiStatusEl.textContent = 'Accès MIDI refusé ou indisponible ici — utilise le clavier virtuel ci-dessous.';
+      midiStatusEl.textContent = 'Pas d\'accès au clavier MIDI ici — joue avec le clavier virtuel ci-dessous.';
     });
   } else {
-    midiStatusEl.textContent = 'Web MIDI non supporté dans ce contexte — utilise le clavier virtuel ci-dessous.';
+    midiStatusEl.textContent = 'Ton navigateur ne supporte pas le MIDI — joue avec le clavier virtuel ci-dessous.';
   }
 })();
 </script>
