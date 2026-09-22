@@ -124,6 +124,48 @@
   button.reset:hover { border-color: var(--gold); color: var(--gold-soft); background: #ffffff08; }
   button.reset:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
+  .tempo-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: -10px;
+  }
+  button.play {
+    background: var(--gold);
+    border: 1px solid var(--gold);
+    color: #1a1305;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 0.85rem;
+    padding: 9px 20px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  button.play:hover { background: var(--gold-soft); border-color: var(--gold-soft); }
+  button.play.playing { background: var(--bad); border-color: var(--bad); color: var(--ivory); }
+  button.play:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+  .tempo-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--ivory-dim);
+  }
+  .tempo-label input {
+    width: 56px;
+    background: var(--bg-panel-2);
+    border: 1px solid var(--line);
+    color: var(--ivory);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    padding: 5px 8px;
+    border-radius: 6px;
+  }
+  .tempo-label input:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+
   .sheet-wrap {
     background: var(--ivory);
     border-radius: 14px;
@@ -258,6 +300,15 @@
     <button class="reset" id="resetBtn">Recommencer</button>
   </div>
 
+  <div class="tempo-row">
+    <button class="play" id="playBtn">Jouer</button>
+    <label class="tempo-label" for="tempoInput">
+      Tempo
+      <input type="number" id="tempoInput" min="40" max="200" step="1" value="90">
+      BPM
+    </label>
+  </div>
+
   <div class="sheet-wrap">
     <div id="sheet"></div>
   </div>
@@ -307,18 +358,39 @@
   '</part></score-partwise>';
 
   var expectedNotes = ["C4","C4","C4","D4","E4","D4","C4","E4","D4"];
+  var expectedBeats = [1, 1, 1, 1, 2, 2, 1, 1, 2];
   var currentIndex = 0;
   var osmd = null;
+  var playing = false;
+  var scheduledTimer = null;
 
   var targetEl = document.getElementById('targetNote');
   var lastNoteEl = document.getElementById('lastNote');
   var winBox = document.getElementById('winBox');
   var midiStatusEl = document.getElementById('midiStatus');
+  var playBtn = document.getElementById('playBtn');
+  var tempoInput = document.getElementById('tempoInput');
+
+  function getTempo() {
+    var bpm = parseInt(tempoInput.value, 10);
+    if (!bpm || bpm < 40) return 40;
+    if (bpm > 200) return 200;
+    return bpm;
+  }
+
+  function scrollCursorIntoView() {
+    if (!osmd || !osmd.cursor || !osmd.cursor.cursorElement) return;
+    try {
+      osmd.cursor.cursorElement.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    } catch (e) {}
+  }
 
   function updateTarget() {
     if (currentIndex >= expectedNotes.length) {
       targetEl.textContent = ' terminé';
       winBox.classList.add('show');
+      if (osmd && osmd.cursor) { try { osmd.cursor.hide(); } catch (e) {} }
+      stopPlayback();
       return;
     }
     targetEl.textContent = ' ' + expectedNotes[currentIndex];
@@ -341,19 +413,69 @@
     flashKeyEl(sourceEl, ok);
     lastNoteEl.classList.add(ok ? 'ok' : 'bad');
 
+    if (playing) return;
+
     if (ok) {
       currentIndex++;
       if (osmd && osmd.cursor && currentIndex < expectedNotes.length) {
         try { osmd.cursor.next(); } catch (e) {}
-      } else if (osmd && osmd.cursor && currentIndex >= expectedNotes.length) {
-        try { osmd.cursor.hide(); } catch (e) {}
       }
       updateTarget();
     }
   }
 
+  function clearScheduledTimer() {
+    if (scheduledTimer) {
+      clearTimeout(scheduledTimer);
+      scheduledTimer = null;
+    }
+  }
+
+  function advanceAuto() {
+    currentIndex++;
+    if (osmd && osmd.cursor && currentIndex < expectedNotes.length) {
+      try { osmd.cursor.next(); } catch (e) {}
+    }
+    updateTarget();
+    scrollCursorIntoView();
+    if (playing && currentIndex < expectedNotes.length) {
+      scheduleNext();
+    }
+  }
+
+  function scheduleNext() {
+    clearScheduledTimer();
+    if (!playing || currentIndex >= expectedNotes.length) return;
+    var ms = expectedBeats[currentIndex] * (60000 / getTempo());
+    scheduledTimer = setTimeout(advanceAuto, ms);
+  }
+
+  function updatePlayButton() {
+    playBtn.textContent = playing ? 'Pause' : 'Jouer';
+    playBtn.classList.toggle('playing', playing);
+  }
+
+  function togglePlay() {
+    if (currentIndex >= expectedNotes.length) return;
+    playing = !playing;
+    updatePlayButton();
+    if (playing) {
+      scheduleNext();
+    } else {
+      clearScheduledTimer();
+    }
+  }
+  playBtn.addEventListener('click', togglePlay);
+
+  function stopPlayback() {
+    playing = false;
+    clearScheduledTimer();
+    updatePlayButton();
+  }
+
   function resetAll() {
     currentIndex = 0;
+    stopPlayback();
     winBox.classList.remove('show');
     lastNoteEl.textContent = '\u00A0';
     lastNoteEl.className = 'midi-note';
