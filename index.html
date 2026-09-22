@@ -229,11 +229,16 @@
   .key.black {
     position: absolute;
     top: 0;
-    width: 6.2%;
     height: 60%;
     background: #262a33;
     border-radius: 0 0 3px 3px;
     z-index: 2;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 6px;
+    font-size: 0.62rem;
+    color: var(--ivory-dim);
   }
   .key.black.correct { background: var(--ok); }
   .key.black.wrong { background: var(--bad); }
@@ -271,7 +276,9 @@
     border: 1px solid var(--line);
     border-radius: 10px;
     cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
   }
+  .midi-status.tapped { border-color: var(--gold); background: var(--bg-panel-2); }
 
   .win {
     display: none;
@@ -337,7 +344,7 @@
 
   <div class="keys-hint">
     Sans clavier MIDI, joue avec la souris/le tactile sur le clavier ci-dessus, ou avec ton clavier d'ordinateur :
-    touches blanches <code>a s d f g h j k</code>, touches noires <code>w e t y u</code>.
+    touches blanches <code>z x a s d f g h j k l ;</code>, touches noires <code>q w e t y u i o</code>.
   </div>
 </main>
 
@@ -406,8 +413,9 @@
     }
 
     var elapsedBeats = anchorBeats + (Date.now() - anchorRealTime) * (SONG_TEMPO / 60000);
+    var noteEndBeat = cumulativeBeats[currentIndex] + expectedBeats[currentIndex];
 
-    if (elapsedBeats >= cumulativeBeats[currentIndex]) {
+    if (elapsedBeats >= noteEndBeat) {
       frozen = true;
       renderHighway(cumulativeBeats[currentIndex]);
       requestAnimationFrame(animationTick);
@@ -504,8 +512,10 @@
   }
   document.getElementById('resetBtn').addEventListener('click', resetAll);
 
-  // --- Clavier virtuel ---
+  // --- Clavier virtuel (un peu plus large qu'une octave) ---
   var whiteDefs = [
+    { note: 'A3', midi: 57, key: 'z' },
+    { note: 'B3', midi: 59, key: 'x' },
     { note: 'C4', midi: 60, key: 'a' },
     { note: 'D4', midi: 62, key: 's' },
     { note: 'E4', midi: 64, key: 'd' },
@@ -513,33 +523,45 @@
     { note: 'G4', midi: 67, key: 'g' },
     { note: 'A4', midi: 69, key: 'h' },
     { note: 'B4', midi: 71, key: 'j' },
-    { note: 'C5', midi: 72, key: 'k' }
+    { note: 'C5', midi: 72, key: 'k' },
+    { note: 'D5', midi: 74, key: 'l' },
+    { note: 'E5', midi: 76, key: ';' }
   ];
   var blackDefs = [
-    { note: 'C#4', midi: 61, key: 'w', afterWhite: 0 },
-    { note: 'D#4', midi: 63, key: 'e', afterWhite: 1 },
-    { note: 'F#4', midi: 66, key: 't', afterWhite: 3 },
-    { note: 'G#4', midi: 68, key: 'y', afterWhite: 4 },
-    { note: 'A#4', midi: 70, key: 'u', afterWhite: 5 }
+    { note: 'A#3', midi: 58, key: 'q', afterWhite: 0 },
+    { note: 'C#4', midi: 61, key: 'w', afterWhite: 2 },
+    { note: 'D#4', midi: 63, key: 'e', afterWhite: 3 },
+    { note: 'F#4', midi: 66, key: 't', afterWhite: 5 },
+    { note: 'G#4', midi: 68, key: 'y', afterWhite: 6 },
+    { note: 'A#4', midi: 70, key: 'u', afterWhite: 7 },
+    { note: 'C#5', midi: 73, key: 'i', afterWhite: 9 },
+    { note: 'D#5', midi: 75, key: 'o', afterWhite: 10 }
   ];
 
   var pianoEl = document.getElementById('piano');
   var keyElsByMidi = {};
 
+  function noteLabel(note) {
+    return note.replace('#', '♯');
+  }
+
   whiteDefs.forEach(function (d) {
     var el = document.createElement('div');
     el.className = 'key white';
-    el.textContent = d.key;
+    el.textContent = noteLabel(d.note.replace(/\d+/, ''));
     el.addEventListener('pointerdown', function () { handleNote(d.note, el); });
     pianoEl.appendChild(el);
     keyElsByMidi[d.midi] = el;
   });
 
   var whiteWidthPct = 100 / whiteDefs.length;
+  var blackWidthPct = whiteWidthPct * 0.52;
   blackDefs.forEach(function (d) {
     var el = document.createElement('div');
     el.className = 'key black';
-    el.style.left = (whiteWidthPct * (d.afterWhite + 1) - 3.1) + '%';
+    el.style.left = (whiteWidthPct * (d.afterWhite + 1) - blackWidthPct / 2) + '%';
+    el.style.width = blackWidthPct + '%';
+    el.textContent = noteLabel(d.note.replace(/\d+/, ''));
     el.addEventListener('pointerdown', function (e) {
       e.stopPropagation();
       handleNote(d.note, el);
@@ -554,7 +576,7 @@
     noteLayout[d.note] = { left: i * whiteWidthPct, width: whiteWidthPct };
   });
   blackDefs.forEach(function (d) {
-    noteLayout[d.note] = { left: whiteWidthPct * (d.afterWhite + 1) - 3.1, width: 6.2 };
+    noteLayout[d.note] = { left: whiteWidthPct * (d.afterWhite + 1) - blackWidthPct / 2, width: blackWidthPct };
   });
 
   barEls = expectedNotes.map(function (noteName) {
@@ -586,10 +608,16 @@
   }
 
   var midiConnected = false;
+  var isStandaloneApp = window.navigator.standalone === true ||
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
 
   function connectMidi() {
     if (!navigator.requestMIDIAccess) {
-      midiStatusEl.textContent = 'Ton navigateur ne supporte pas le MIDI — joue avec le clavier virtuel ci-dessous.';
+      if (isStandaloneApp) {
+        midiStatusEl.textContent = 'Le MIDI ne marche pas dans l\'app installée sur iPhone — ouvre le lien dans Safari directement pour brancher ton clavier.';
+      } else {
+        midiStatusEl.textContent = 'Ton navigateur ne supporte pas le MIDI (iOS 16.4+ requis) — joue avec le clavier virtuel ci-dessous.';
+      }
       return;
     }
     midiStatusEl.textContent = 'Recherche d\'un clavier MIDI…';
@@ -619,7 +647,10 @@
   }
 
   midiStatusEl.addEventListener('click', function () {
-    if (!midiConnected) connectMidi();
+    if (midiConnected) return;
+    midiStatusEl.classList.add('tapped');
+    setTimeout(function () { midiStatusEl.classList.remove('tapped'); }, 200);
+    connectMidi();
   });
   connectMidi();
 })();
